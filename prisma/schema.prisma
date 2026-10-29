@@ -1,0 +1,173 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                    String                 @id @default(cuid())
+  email                 String                 @unique
+  name                  String
+  passwordHash          String
+  role                  String                 @default("DEVELOPER")
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  projects              Project[]
+  repositoryConnections RepositoryConnection[]
+  integrations          IntegrationRecord[]
+  auditEvents           AuditEvent[]
+
+  @@map("users")
+}
+
+model Project {
+  id             String          @id @default(cuid())
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  slug           String
+  description    String?
+  repository     String
+  branch         String          @default("main")
+  runtime        String          @default("NODEJS_20")
+  buildCommand   String          @default("npm run build")
+  startCommand   String          @default("npm start")
+  dockerfilePath String?         @default("Dockerfile")
+  port           Int             @default(3000)
+  environment    String          @default("PRODUCTION")
+  region         String          @default("us-east-1")
+  target         String          @default("ECS_FARGATE")
+  status         String          @default("ACTIVE")
+  healthStatus   String          @default("HEALTHY")
+  liveUrl        String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  envVars        ProjectEnvVar[]
+  deployments    Deployment[]
+  auditEvents    AuditEvent[]
+
+  @@unique([userId, slug])
+  @@map("projects")
+}
+
+model ProjectEnvVar {
+  id             String   @id @default(cuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key            String
+  valueEncrypted String
+  isSecret       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([projectId, key])
+  @@map("project_env_vars")
+}
+
+model RepositoryConnection {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider      String    @default("GITHUB")
+  repoFullName  String
+  repoUrl       String
+  defaultBranch String    @default("main")
+  status        String    @default("CONNECTED")
+  lastSyncAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("repository_connections")
+}
+
+model Deployment {
+  id                String            @id @default(cuid())
+  projectId         String
+  project           Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  commitSha         String
+  commitMessage     String
+  branch            String
+  author            String
+  trigger           String            @default("MANUAL")
+  status            String            @default("PENDING")
+  targetEnvironment String            @default("PRODUCTION")
+  dockerImageTag    String?
+  durationSeconds   Int?
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  errorMessage      String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  stages            DeploymentStage[]
+  logs              DeploymentLog[]
+
+  @@index([projectId, createdAt])
+  @@map("deployments")
+}
+
+model DeploymentStage {
+  id              String     @id @default(cuid())
+  deploymentId    String
+  deployment      Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  name            String
+  order           Int
+  status          String     @default("PENDING")
+  durationSeconds Int?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  errorMessage    String?
+
+  @@index([deploymentId, order])
+  @@map("deployment_stages")
+}
+
+model DeploymentLog {
+  id           String     @id @default(cuid())
+  deploymentId String
+  deployment   Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  stageName    String?
+  level        String     @default("INFO")
+  message      String
+  timestamp    DateTime   @default(now())
+
+  @@index([deploymentId, timestamp])
+  @@map("deployment_logs")
+}
+
+model IntegrationRecord {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         String
+  name         String
+  status       String    @default("DISCONNECTED")
+  configJson   String?
+  lastSyncAt   DateTime?
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([userId, type])
+  @@map("integration_records")
+}
+
+model AuditEvent {
+  id           String   @id @default(cuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  projectId    String?
+  project      Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  action       String
+  resourceType String
+  resourceId   String?
+  details      String?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([projectId, createdAt])
+  @@map("audit_events")
+}

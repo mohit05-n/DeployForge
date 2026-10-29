@@ -1,0 +1,1 @@
+E:/DeployForge/node_modules/@embedded-postgres/windows-x64/native/bin/postgres.exe "-D" "E:\DeployForge\.postgres-data" "-p" "54332"
