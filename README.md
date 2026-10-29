@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # DeployForge — Full-Stack Cloud Deployment Platform
 
 **DeployForge** is a self-service cloud deployment platform for developers. It provides a single dashboard to connect GitHub repositories, configure deployments, build Docker images, scan them with Trivy, deploy to AWS, and monitor running applications.
@@ -181,3 +182,6 @@ npm run build
 | `/api/integrations` | GET | List integration records and statuses | Yes |
 | `/api/integrations/sync` | POST | Test & refresh integration status records | Yes |
 | `/api/audit` | GET | View security & operation audit logs | Yes |
+=======
+# DeployForge
+>>>>>>> origin/main
