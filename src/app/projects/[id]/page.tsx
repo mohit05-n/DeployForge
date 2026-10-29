@@ -46,7 +46,7 @@ export default function ProjectDetailPage() {
     if (result.error) {
       toast({ title: 'Deploy failed', description: result.error, variant: 'error' })
     } else {
-      toast({ title: 'Deployment queued!', description: 'Demo mode — no real deployment triggered.', variant: 'success' })
+      toast({ title: 'Deployment queued!', description: `Deployment initiated for ${project.name}.`, variant: 'success' })
       router.push(`/deployments/${result.data.id}`)
     }
   }

@@ -5,10 +5,12 @@ import { verifyProjectAccess } from '@/lib/server/project-auth'
 import { successResponse, errorResponse } from '@/lib/server/response'
 import { logAuditEvent } from '@/lib/server/audit'
 import { logger } from '@/lib/server/logger'
+import { validateGitHubRepoUrl, validateBranchName } from '@/lib/server/validation'
 
 const UpdateProjectSchema = z.object({
   name: z.string().min(2).max(60).optional(),
   description: z.string().max(255).optional(),
+  repository: z.string().min(1).optional(),
   branch: z.string().min(1).optional(),
   runtime: z.enum(['NODEJS_20', 'PYTHON_311', 'GO_122', 'RUST_175', 'DOCKERFILE']).optional(),
   buildCommand: z.string().optional(),
@@ -93,7 +95,26 @@ export async function PATCH(
       )
     }
 
-    const { envVars, ...updateData } = parsed.data
+    const { envVars, repository, branch, ...restUpdate } = parsed.data
+    const updateData: Record<string, unknown> = { ...restUpdate }
+
+    if (repository !== undefined) {
+      const repoVal = validateGitHubRepoUrl(repository)
+      if (!repoVal.valid) {
+        return errorResponse(repoVal.error || 'Invalid repository URL', 400, 'INVALID_REPOSITORY')
+      }
+      updateData.repository = repoVal.fullName || repository
+      updateData.repoOwner = repoVal.owner
+      updateData.repoName = repoVal.repo
+    }
+
+    if (branch !== undefined) {
+      const branchVal = validateBranchName(branch)
+      if (!branchVal.valid) {
+        return errorResponse(branchVal.error || 'Invalid branch name', 400, 'INVALID_BRANCH')
+      }
+      updateData.branch = branch
+    }
 
     // If envVars are supplied, update them transactionally
     const updated = await prisma.$transaction(async (tx) => {

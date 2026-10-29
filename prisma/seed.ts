@@ -15,6 +15,9 @@ async function main() {
   console.log('Seeding DeployForge database...')
 
   // Clear existing records to ensure clean state
+  await prisma.webhookDelivery.deleteMany()
+  await prisma.oAuthState.deleteMany()
+  await prisma.gitHubAccount.deleteMany()
   await prisma.auditEvent.deleteMany()
   await prisma.deploymentLog.deleteMany()
   await prisma.deploymentStage.deleteMany()
@@ -113,9 +116,9 @@ async function main() {
       envVars: {
         create: [
           { key: 'NODE_ENV', valueEncrypted: 'production', isSecret: false },
-          { key: 'DATABASE_URL', valueEncrypted: 'postgresql://db_user:enc_pwd@rds.internal:5432/pay', isSecret: true },
-          { key: 'STRIPE_SECRET_KEY', valueEncrypted: 'sk_live_51M0MockKeyNotRealValue12345', isSecret: true },
-          { key: 'PAYPAL_CLIENT_ID', valueEncrypted: 'AZMockClientID987654321', isSecret: true },
+          { key: 'DATABASE_URL', valueEncrypted: process.env.PAYMENT_DATABASE_URL || 'postgresql://payment_dev_user:payment_dev_placeholder@localhost:5432/payment_dev', isSecret: true },
+          { key: 'STRIPE_SECRET_KEY', valueEncrypted: process.env.STRIPE_SECRET_KEY || 'stripe_placeholder_local_dev_only', isSecret: true },
+          { key: 'PAYPAL_CLIENT_ID', valueEncrypted: process.env.PAYPAL_CLIENT_ID || 'paypal_placeholder_client_id_dev_only', isSecret: true },
         ],
       },
     },
@@ -143,8 +146,8 @@ async function main() {
       envVars: {
         create: [
           { key: 'PORT', valueEncrypted: '4000', isSecret: false },
-          { key: 'JWT_SIGNING_KEY', valueEncrypted: 'mock_jwt_signing_key_secret_long_482390', isSecret: true },
-          { key: 'REDIS_URL', valueEncrypted: 'redis://cache.internal:6379', isSecret: true },
+          { key: 'JWT_SIGNING_KEY', valueEncrypted: process.env.AUTH_JWT_SIGNING_KEY || 'dev_placeholder_jwt_signing_key_not_real', isSecret: true },
+          { key: 'REDIS_URL', valueEncrypted: process.env.AUTH_REDIS_URL || 'redis://localhost:6379', isSecret: true },
         ],
       },
     },
@@ -172,7 +175,7 @@ async function main() {
       envVars: {
         create: [
           { key: 'PYTHONUNBUFFERED', valueEncrypted: '1', isSecret: false },
-          { key: 'DATABASE_URL', valueEncrypted: 'postgresql://inv_user:enc_pwd@rds.eu-west-1:5432/inv', isSecret: true },
+          { key: 'DATABASE_URL', valueEncrypted: process.env.INVENTORY_DATABASE_URL || 'postgresql://inventory_dev_user:inventory_dev_placeholder@localhost:5432/inventory_dev', isSecret: true },
         ],
       },
     },
@@ -282,14 +285,12 @@ async function main() {
         userId: alex.id,
         type: 'GITHUB',
         name: 'GitHub App Connection',
-        status: 'CONNECTED',
+        status: 'DISCONNECTED',
         configJson: JSON.stringify({
-          organization: 'deployforge-demo',
-          repositoriesCount: 4,
-          webhookActive: true,
-          mode: 'simulated_read_only',
+          configured: false,
+          mode: 'oauth_required',
         }),
-        lastSyncAt: new Date(),
+        lastSyncAt: null,
       },
       {
         userId: alex.id,

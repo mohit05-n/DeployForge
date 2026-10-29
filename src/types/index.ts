@@ -168,6 +168,14 @@ export interface SecurityScan {
   deploymentId: string
   imageTag: string
   status: 'pending' | 'scanning' | 'completed' | 'failed'
+  scanResult?: 'passed' | 'blocked' | 'error' | 'pending'
+  blockingPolicyViolated?: boolean
+  severityThreshold?: string
+  scannerVersion?: string
+  isSimulated?: boolean
+  rawReportJson?: string | null
+  errorMessage?: string | null
+  errorCategory?: string | null
   scannedAt?: string
   scanner: string
   summary: {

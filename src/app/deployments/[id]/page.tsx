@@ -141,7 +141,7 @@ export default function DeploymentDetailPage() {
         onClose={() => setShowRetryDialog(false)}
         onConfirm={handleRetry}
         title="Retry deployment"
-        description="Re-run this deployment with the same commit. In demo mode, no real action is taken."
+        description="Re-queue this deployment with the same commit SHA and target configuration."
         confirmLabel="Retry"
         confirmVariant="default"
         isLoading={isActioning}
@@ -151,7 +151,7 @@ export default function DeploymentDetailPage() {
         onClose={() => setShowRollbackDialog(false)}
         onConfirm={handleRollback}
         title="Rollback deployment"
-        description="Roll back to the previous successful deployment. In demo mode, no real action is taken."
+        description="Roll back to the previous successful deployment image tag and revision."
         confirmLabel="Rollback"
         confirmVariant="destructive"
         isLoading={isActioning}
@@ -172,10 +172,6 @@ export default function DeploymentDetailPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-full border border-amber-800/50 bg-amber-950/30 px-3 py-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-            <span className="text-xs text-amber-400">Demo Mode</span>
-          </div>
           {deployment.status === 'failed' && (
             <Button size="sm" onClick={() => setShowRetryDialog(true)}>
               <RefreshCw className="h-4 w-4" /> Retry

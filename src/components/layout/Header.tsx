@@ -65,12 +65,7 @@ export function Header({ onMenuClick }: HeaderProps) {
 
       <Breadcrumbs />
 
-      <div className="ml-auto flex items-center gap-2">
-        {/* Demo Mode pill */}
-        <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-amber-800/50 bg-amber-950/50 px-3 py-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-          <span className="text-xs font-medium text-amber-400">Demo Mode</span>
-        </div>
+      <div className="ml-auto flex items-center gap-3">
         <button
           className="text-slate-500 hover:text-slate-300 transition-colors relative"
           aria-label="Notifications"

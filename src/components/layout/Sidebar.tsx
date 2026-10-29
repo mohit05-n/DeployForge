@@ -35,7 +35,7 @@ interface SidebarProps {
 
 function NavLink({ item, onClick }: { item: NavItem; onClick?: () => void }) {
   const pathname = usePathname()
-  const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+  const isActive = pathname === item.href || (item.href === '/dashboard' && pathname === '/') || pathname.startsWith(item.href + '/')
   const Icon = item.icon
   return (
     <Link
@@ -69,10 +69,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
         </div>
         <div>
           <span className="text-sm font-bold text-white">DeployForge</span>
-          <div className="flex items-center gap-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-            <span className="text-xs text-amber-400 font-medium">Demo Mode</span>
-          </div>
+          <p className="text-[11px] text-slate-400 font-medium leading-none">Cloud Platform</p>
         </div>
         {onClose && (
           <button onClick={onClose} className="ml-auto text-slate-500 hover:text-slate-300 lg:hidden">
@@ -118,11 +115,17 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-3 rounded-lg p-2">
-            <User className="h-8 w-8 text-slate-500" />
-            <div>
-              <p className="text-sm text-slate-400">Not signed in</p>
+          <div className="flex items-center justify-between rounded-lg p-2 bg-slate-900/60 border border-slate-800">
+            <div className="flex items-center gap-2">
+              <User className="h-5 w-5 text-slate-500" />
+              <span className="text-xs text-slate-400">Not signed in</span>
             </div>
+            <Link
+              href="/auth/signin"
+              className="rounded bg-brand-600 hover:bg-brand-500 text-white text-xs px-2.5 py-1 font-medium transition-colors"
+            >
+              Sign in
+            </Link>
           </div>
         )}
       </div>

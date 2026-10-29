@@ -1,5 +1,36 @@
-node_modules
-# Keep environment variables out of version control
-.env
+node_modules/
 
-/src/generated/prisma
+# Keep environment variables and secrets out of version control
+.env
+.env*.local
+.env.local
+.env.production
+.env.development
+!.env.example
+
+# Large image archives
+*.tar
+
+.next/
+.postgres-data/
+/src/generated/prisma/
+
+# Terraform state and local directories
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+*tfplan*
+*.plan
+
+
+*.tsbuildinfo

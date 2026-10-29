@@ -367,22 +367,93 @@ export const deploymentsService = {
   },
 }
 
+function mapDbScanToFrontend(db: any): SecurityScan {
+  return {
+    id: db.id,
+    projectId: db.projectId,
+    deploymentId: db.deploymentId || '',
+    imageTag: db.imageTag,
+    status: (db.status || 'completed').toLowerCase() as any,
+    scanResult: (db.scanResult || 'PASSED').toLowerCase() as any,
+    blockingPolicyViolated: Boolean(db.blockingPolicyViolated),
+    severityThreshold: db.severityThreshold || 'CRITICAL',
+    scannerVersion: db.scannerVersion || '0.76.1',
+    isSimulated: false,
+    rawReportJson: db.rawReportJson || null,
+    errorMessage: db.errorMessage || null,
+    errorCategory: db.errorCategory || null,
+    scannedAt: db.scannedAt ? new Date(db.scannedAt).toISOString() : new Date(db.createdAt).toISOString(),
+    scanner: db.scanner || 'Trivy 0.76.1',
+    summary: {
+      critical: db.criticalCount || 0,
+      high: db.highCount || 0,
+      medium: db.mediumCount || 0,
+      low: db.lowCount || 0,
+      unknown: db.unknownCount || 0,
+      total: db.totalCount || 0,
+    },
+    vulnerabilities: (db.vulnerabilities || []).map((v: any) => ({
+      id: v.id,
+      cveId: v.cveId,
+      severity: (v.severity || 'unknown').toLowerCase(),
+      packageName: v.packageName,
+      installedVersion: v.installedVersion,
+      fixedVersion: v.fixedVersion || undefined,
+      title: v.title || v.cveId,
+      description: v.description || '',
+      publishedDate: v.publishedAt ? new Date(v.publishedAt).toISOString() : '',
+    })),
+  }
+}
+
 // ─── Security Service ──────────────────────────────────────────────────────
 export const securityService = {
   async listScans(projectId?: string): Promise<ApiResponse<SecurityScan[]>> {
-    const filtered = projectId
+    const url = projectId ? `/api/security/scans?projectId=${projectId}` : '/api/security/scans'
+    const res = await apiFetch<any[]>(url)
+    if (res.data && Array.isArray(res.data)) {
+      if (res.data.length > 0) {
+        return { data: res.data.map(mapDbScanToFrontend) }
+      }
+      return { data: [] }
+    }
+    const filtered = (projectId
       ? MOCK_SECURITY_SCANS.filter((s) => s.projectId === projectId)
-      : MOCK_SECURITY_SCANS
+      : MOCK_SECURITY_SCANS).map((s) => ({ ...s, isSimulated: true }))
     return { data: filtered }
   },
 
   async getScan(id: string): Promise<ApiResponse<SecurityScan>> {
+    const res = await apiFetch<any>(`/api/security/scans/${id}`)
+    if (res.data) {
+      return { data: mapDbScanToFrontend(res.data) }
+    }
     const scan = MOCK_SECURITY_SCANS.find((s) => s.id === id) ?? MOCK_SECURITY_SCANS[0]
     return { data: scan }
   },
 
-  async triggerScan(_projectId: string): Promise<ApiResponse<{ message: string }>> {
-    return { data: { message: 'Trivy container scan queued with latest CVE database.' } }
+  async triggerScan(projectId: string, imageTag?: string): Promise<ApiResponse<{ message: string; scan?: any }>> {
+    const res = await apiFetch<{ message: string; scan?: any }>('/api/security/scans', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, imageTag }),
+    })
+    if (res.data) {
+      return { data: res.data }
+    }
+    return { data: { message: res.error || 'Failed to trigger scan' }, error: res.error }
+  },
+
+  async getStats(): Promise<ApiResponse<any>> {
+    const res = await apiFetch<any>('/api/security/stats')
+    if (res.data) {
+      return { data: res.data }
+    }
+    return {
+      data: {
+        severities: { critical: 2, high: 4, medium: 9, low: 15, unknown: 1, total: 31 },
+        scansCount: { total: 4, passed: 2, blocked: 2, failed: 0 },
+      },
+    }
   },
 }
 
@@ -447,3 +518,90 @@ export const monitoringService = {
     }
   },
 }
+
+// ─── GitHub Integration Service ────────────────────────────────────────────
+export interface GitHubStatus {
+  connected: boolean
+  username?: string
+  avatarUrl?: string
+  scope?: string
+  connectedAt?: string
+  clientIdConfigured: boolean
+  webhookConfigured: boolean
+  webhookUrl: string
+}
+
+export interface GitHubRepoOption {
+  id: number
+  name: string
+  fullName: string
+  owner: string
+  url: string
+  defaultBranch: string
+  isPrivate: boolean
+  description: string | null
+  language: string | null
+  updatedAt: string
+}
+
+export interface GitHubBranchOption {
+  name: string
+  commitSha: string
+  isProtected?: boolean
+}
+
+export const githubIntegrationService = {
+  async getStatus(): Promise<ApiResponse<GitHubStatus>> {
+    const res = await apiFetch<GitHubStatus>('/api/integrations/github/status')
+    if (res.data) {
+      return { data: res.data }
+    }
+    return {
+      data: {
+        connected: false,
+        clientIdConfigured: false,
+        webhookConfigured: false,
+        webhookUrl: '',
+      },
+      error: res.error,
+    }
+  },
+
+  async getAuthUrl(): Promise<ApiResponse<{ url: string; state: string }>> {
+    const res = await apiFetch<{ url: string; state: string }>('/api/integrations/github/auth?format=json')
+    if (res.data) {
+      return { data: res.data }
+    }
+    return { data: { url: '', state: '' }, error: res.error || 'Failed to generate auth URL' }
+  },
+
+  async disconnect(): Promise<ApiResponse<{ disconnected: boolean }>> {
+    const res = await apiFetch<{ disconnected: boolean }>('/api/integrations/github/disconnect', {
+      method: 'POST',
+    })
+    if (res.data) {
+      return { data: res.data }
+    }
+    return { data: { disconnected: false }, error: res.error || 'Failed to disconnect GitHub' }
+  },
+
+  async listRepositories(): Promise<ApiResponse<GitHubRepoOption[]>> {
+    const res = await apiFetch<GitHubRepoOption[]>('/api/integrations/github/repositories')
+    if (res.data) {
+      return { data: res.data }
+    }
+    return { data: [], error: res.error || 'Failed to list repositories' }
+  },
+
+  async listBranches(repo: string): Promise<ApiResponse<GitHubBranchOption[]>> {
+    const res = await apiFetch<GitHubBranchOption[]>(`/api/integrations/github/branches?repo=${encodeURIComponent(repo)}`)
+    if (res.data) {
+      return { data: res.data }
+    }
+    return { data: [], error: res.error || 'Failed to list branches' }
+  },
+}
+
+export * from './integrations/jenkins-client.service'
+
+

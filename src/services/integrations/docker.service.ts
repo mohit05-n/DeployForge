@@ -1,19 +1,28 @@
 import { IIntegrationService, IntegrationResult, IntegrationServiceInfo } from './types'
+import { getBuildWorker } from '@/lib/server/build'
 
 export interface BuildImageParams {
   projectName: string
+  projectSlug?: string
+  deploymentId?: string
   branch: string
   commitSha: string
   dockerfilePath?: string
+  buildCommand?: string
+  startCommand?: string
+  port?: number
+  envVars?: Record<string, string>
+  secrets?: Record<string, string>
 }
 
 export interface BuildImageResult {
   imageTag: string
-  digest: string
-  sizeBytes: number
-  layersCount: number
+  digest?: string
+  sizeBytes?: number
+  layersCount?: number
   buildDurationSeconds: number
   logs: string[]
+  workerType: 'mock' | 'docker'
 }
 
 class DockerIntegrationService implements IIntegrationService {
@@ -21,57 +30,86 @@ class DockerIntegrationService implements IIntegrationService {
   readonly provider = 'DOCKER'
 
   async getInfo(): Promise<IntegrationServiceInfo> {
+    const isRealEnabled = process.env.ENABLE_REAL_DOCKER_BUILDS === 'true'
+    const workerType = process.env.BUILD_RUNNER_TYPE || 'mock'
+    const worker = getBuildWorker()
+
     return {
       name: this.name,
       provider: this.provider,
-      state: 'mock_active',
+      state: isRealEnabled ? 'connected' : 'mock_active',
       isConfigured: true,
-      isSimulated: true,
-      description: 'Simulated container builder engine. Arbitrary host execution is disabled.',
+      isSimulated: !isRealEnabled,
+      description: isRealEnabled
+        ? 'Real Docker Engine worker enabled with cgroups resource boundaries.'
+        : 'Isolated mock container builder active. Arbitrary host execution is disabled.',
       details: {
-        engineVersion: '29.8.1-simulated',
-        registry: '123456789012.dkr.ecr.us-east-1.amazonaws.com',
-        layerCaching: true,
+        workerName: worker.name,
+        runnerType: workerType,
+        realBuildsGated: isRealEnabled,
+        limits: {
+          cpuLimit: '2.0 cores',
+          memoryLimit: '2 GB',
+          timeout: '600s',
+          pidsLimit: 256,
+          networkMode: 'isolated',
+        },
+        securityEnforcements: [
+          'Host Docker socket mounting strictly forbidden',
+          'Secrets stripped from build arguments and image layers',
+          'Unique immutable image tags tied to deployment ID',
+          'Automated workspace directory cleanup on completion',
+        ],
       },
     }
   }
 
   async testConnection(): Promise<{ connected: boolean; message: string; isSimulated: true }> {
+    const isRealEnabled = process.env.ENABLE_REAL_DOCKER_BUILDS === 'true'
     return {
       connected: true,
-      message: 'Docker engine simulation active with secure build sandboxing.',
+      message: isRealEnabled
+        ? 'Docker daemon accessible with isolated execution boundaries.'
+        : 'Docker engine simulation active with secure build sandboxing.',
       isSimulated: true,
     }
   }
 
   async buildImage(params: BuildImageParams): Promise<IntegrationResult<BuildImageResult>> {
-    const shortSha = params.commitSha.slice(0, 7)
-    const imageTag = `${params.projectName}:${shortSha}`
-    const digest = `sha256:${Buffer.from(imageTag + Date.now()).toString('hex').slice(0, 64)}`
+    const worker = getBuildWorker()
+    const deploymentId = params.deploymentId || `sim-${Date.now().toString(36)}`
+    const projectSlug = params.projectSlug || params.projectName.toLowerCase().replace(/[^a-z0-9_-]/g, '-')
 
-    const logs = [
-      `[Docker] Parsing Dockerfile from ${params.dockerfilePath || 'Dockerfile'}...`,
-      `[Docker] Stage 1/3: FROM node:20-alpine AS deps`,
-      `[Docker] CACHE: using cached layer sha256:4bd1b696`,
-      `[Docker] Stage 2/3: FROM node:20-alpine AS builder`,
-      `[Docker] Running package build for ${params.projectName} on branch ${params.branch}...`,
-      `[Docker] Build completed in 32.4s`,
-      `[Docker] Stage 3/3: FROM node:20-alpine AS runner`,
-      `[Docker] Image tagged as ${imageTag}`,
-      `[Docker] Pushing to ECR registry 123456789012.dkr.ecr.us-east-1.amazonaws.com...`,
-      `[Docker] Successfully pushed ${imageTag} (${digest.slice(0, 19)}...)`,
-    ]
+    const jobResult = await worker.executeBuild({
+      id: `job-${deploymentId.slice(-6)}-${Date.now().toString(36)}`,
+      deploymentId,
+      projectId: `proj-${projectSlug}`,
+      projectSlug,
+      projectName: params.projectName,
+      repoUrl: `https://github.com/example/${projectSlug}`,
+      commitSha: params.commitSha,
+      branch: params.branch,
+      projectType: params.dockerfilePath ? 'DOCKERFILE_CUSTOM' : 'NODEJS_GENERIC',
+      buildCommand: params.buildCommand || 'npm run build',
+      startCommand: params.startCommand || 'npm start',
+      dockerfilePath: params.dockerfilePath,
+      port: params.port || 3000,
+      envVars: params.envVars,
+      secrets: params.secrets,
+    })
 
     return {
-      success: true,
+      success: jobResult.success,
       data: {
-        imageTag,
-        digest,
-        sizeBytes: 142 * 1024 * 1024,
-        layersCount: 9,
-        buildDurationSeconds: 42,
-        logs,
+        imageTag: jobResult.imageTag,
+        digest: jobResult.digest,
+        sizeBytes: jobResult.sizeBytes,
+        layersCount: jobResult.layersCount,
+        buildDurationSeconds: jobResult.buildDurationSeconds,
+        logs: jobResult.logs.map((l) => `[${l.level}] ${l.message}`),
+        workerType: jobResult.workerType,
       },
+      error: jobResult.success ? undefined : jobResult.errorDetails || jobResult.summary,
       isSimulated: true,
       timestamp: new Date().toISOString(),
     }

@@ -1,0 +1,78 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: deployforge-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: deployforge_dev
+      POSTGRES_DB: deployforge
+    ports:
+      - "54332:5432"
+    volumes:
+      - deployforge_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d deployforge" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - deployforge-net
+
+  # Jenkins CI/CD Server
+  jenkins:
+    image: jenkins/jenkins:lts-jdk21
+    container_name: deployforge-jenkins
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+    networks:
+      - deployforge-net
+
+  # DeployForge Web Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: deployforge-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+      - "3001:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://postgres:deployforge_dev@postgres:5432/deployforge?schema=public"
+      JWT_SECRET: "deployforge_dev_secret_key_98327498237498237498327498"
+      ENCRYPTION_KEY: "deployforge_master_aes256_encryption_key_32bytes!"
+      SESSION_COOKIE_NAME: "deployforge_session"
+      SESSION_MAX_AGE_SECONDS: 604800
+      NODE_ENV: "production"
+      PORT: 3000
+      APP_URL: "${APP_URL:-http://localhost:3000}"
+      BUILD_RUNNER_TYPE: "${BUILD_RUNNER_TYPE:-mock}"
+      ENABLE_REAL_DOCKER_BUILDS: "${ENABLE_REAL_DOCKER_BUILDS:-false}"
+      ENABLE_REAL_JENKINS: "${ENABLE_REAL_JENKINS:-false}"
+      JENKINS_URL: "${JENKINS_CONTAINER_URL:-http://jenkins:8080}"
+      JENKINS_JOB_NAME: "${JENKINS_JOB_NAME:-DeployForge-Build}"
+      JENKINS_USERNAME: "${JENKINS_USERNAME:-}"
+      JENKINS_API_TOKEN: "${JENKINS_API_TOKEN:-}"
+      JENKINS_CALLBACK_SECRET: "${JENKINS_CALLBACK_SECRET:-deployforge_jenkins_callback_secret_32bytes!}"
+      AWS_REGION: "${AWS_REGION:-ap-south-1}"
+      ECR_REPOSITORY_URI: "${ECR_REPOSITORY_URI:-}"
+    networks:
+      - deployforge-net
+
+volumes:
+  deployforge_pgdata:
+    name: deployforge_pgdata
+  jenkins_home:
+
+networks:
+  deployforge-net:
+    name: deployforge-net
+    driver: bridge

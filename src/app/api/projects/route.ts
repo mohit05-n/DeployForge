@@ -5,6 +5,7 @@ import { successResponse, errorResponse } from '@/lib/server/response'
 import { checkRateLimit, getClientIp } from '@/lib/server/rate-limiter'
 import { logAuditEvent } from '@/lib/server/audit'
 import { logger } from '@/lib/server/logger'
+import { validateGitHubRepoUrl, validateBranchName } from '@/lib/server/validation'
 
 const CreateProjectSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(60),
@@ -107,6 +108,19 @@ export async function POST(req: Request) {
     }
 
     const data = parsed.data
+
+    // Validate repository URL security and format
+    const repoValidation = validateGitHubRepoUrl(data.repository)
+    if (!repoValidation.valid) {
+      return errorResponse(repoValidation.error || 'Invalid repository URL', 400, 'INVALID_REPOSITORY')
+    }
+
+    // Validate branch name
+    const branchValidation = validateBranchName(data.branch)
+    if (!branchValidation.valid) {
+      return errorResponse(branchValidation.error || 'Invalid branch name', 400, 'INVALID_BRANCH')
+    }
+
     const slug = data.name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
@@ -136,7 +150,9 @@ export async function POST(req: Request) {
         name: data.name,
         slug,
         description: data.description,
-        repository: data.repository,
+        repository: repoValidation.fullName || data.repository,
+        repoOwner: repoValidation.owner,
+        repoName: repoValidation.repo,
         branch: data.branch,
         runtime: data.runtime,
         buildCommand: data.buildCommand,

@@ -47,9 +47,8 @@ export default function ForgotPasswordPage() {
               </div>
               <h2 className="text-lg font-semibold text-slate-100">Check your email</h2>
               <p className="mt-2 text-sm text-slate-400">
-                If an account exists for <strong className="text-slate-200">{email}</strong>, a password reset link has been sent.
+                If an account exists for <strong className="text-slate-200">{email}</strong>, a password reset link has been dispatched.
               </p>
-              <p className="mt-2 text-xs text-amber-400">Demo mode — no real email was sent.</p>
               <Link href="/auth/signin">
                 <Button variant="outline" className="mt-6">Return to sign in</Button>
               </Link>

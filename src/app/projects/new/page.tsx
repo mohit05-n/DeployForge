@@ -1,11 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, ChevronRight, ChevronLeft, Plus, Trash2, Eye, EyeOff } from 'lucide-react'
+import Link from 'next/link'
+import {
+  Check, ChevronRight, ChevronLeft, Plus, Trash2, Eye, EyeOff,
+  GitBranch, Github, ExternalLink, RefreshCw, Lock
+} from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input, FormField, Select, Textarea } from '@/components/ui/Input'
-import { projectsService } from '@/services'
+import { projectsService, githubIntegrationService, GitHubRepoOption, GitHubBranchOption } from '@/services'
 import { toast } from '@/hooks/useToast'
 import { Toaster } from '@/components/ui/Toaster'
 import { cn } from '@/lib/utils'
@@ -111,21 +115,196 @@ function Step1({ form, setForm, errors }: { form: ProjectFormData; setForm: (f: 
 }
 
 function Step2({ form, setForm, errors }: { form: ProjectFormData; setForm: (f: ProjectFormData) => void; errors: Record<string, string> }) {
+  const [isCheckingGitHub, setIsCheckingGitHub] = useState(true)
+  const [isGitHubConnected, setIsGitHubConnected] = useState(false)
+  const [githubUsername, setGithubUsername] = useState<string | null>(null)
+  const [repos, setRepos] = useState<GitHubRepoOption[]>([])
+  const [isLoadingRepos, setIsLoadingRepos] = useState(false)
+  const [branches, setBranches] = useState<GitHubBranchOption[]>([])
+  const [isLoadingBranches, setIsLoadingBranches] = useState(false)
+  const [selectedRepoFull, setSelectedRepoFull] = useState<string>('')
+  const [useManualUrl, setUseManualUrl] = useState(false)
+
+  useEffect(() => {
+    async function checkGitHub() {
+      setIsCheckingGitHub(true)
+      const res = await githubIntegrationService.getStatus()
+      if (res.data?.connected) {
+        setIsGitHubConnected(true)
+        setGithubUsername(res.data.username || null)
+        loadRepos()
+      } else {
+        setIsGitHubConnected(false)
+        setUseManualUrl(true)
+      }
+      setIsCheckingGitHub(false)
+    }
+    checkGitHub()
+  }, [])
+
+  const loadRepos = async () => {
+    setIsLoadingRepos(true)
+    const res = await githubIntegrationService.listRepositories()
+    if (res.data && res.data.length > 0) {
+      setRepos(res.data)
+    }
+    setIsLoadingRepos(false)
+  }
+
+  const handleSelectRepo = async (fullName: string) => {
+    setSelectedRepoFull(fullName)
+    const repo = repos.find((r) => r.fullName === fullName)
+    if (!repo) return
+
+    const canonicalUrl = repo.url || `https://github.com/${fullName}`
+    const defaultBranch = repo.defaultBranch || 'main'
+
+    setForm({
+      ...form,
+      repositoryUrl: canonicalUrl,
+      branch: defaultBranch,
+      name: form.name || repo.name,
+    })
+
+    // Fetch branches for selected repo
+    setIsLoadingBranches(true)
+    const branchRes = await githubIntegrationService.listBranches(fullName)
+    if (branchRes.data && branchRes.data.length > 0) {
+      setBranches(branchRes.data)
+    } else {
+      setBranches([{ name: defaultBranch, commitSha: '' }])
+    }
+    setIsLoadingBranches(false)
+  }
+
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-lg font-semibold text-slate-100">Repository</h2>
-        <p className="text-sm text-slate-500 mt-0.5">Specify the repository URL and branch to deploy.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-100">Repository</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Specify the GitHub repository and branch to deploy.</p>
+        </div>
+
+        {isGitHubConnected && (
+          <button
+            type="button"
+            onClick={() => setUseManualUrl(!useManualUrl)}
+            className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
+          >
+            {useManualUrl ? '← Select from GitHub' : 'Enter URL manually'}
+          </button>
+        )}
       </div>
-      <FormField label="Repository URL" error={errors.repositoryUrl} required hint="Full GitHub HTTPS URL, e.g. https://github.com/org/repo">
-        <Input value={form.repositoryUrl} onChange={(e) => setForm({ ...form, repositoryUrl: e.target.value })} placeholder="https://github.com/org/repo" error={errors.repositoryUrl} />
-      </FormField>
-      <FormField label="Branch" required hint="Default deployment branch (e.g. main, master, production)">
-        <Input value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} placeholder="main" />
-      </FormField>
-      <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-3">
-        <p className="text-xs text-amber-400">GitHub integration not connected — enter repository details manually. Connect GitHub in Settings to enable auto-import.</p>
-      </div>
+
+      {/* GitHub Connection Banner */}
+      {!isCheckingGitHub && (
+        <div className={cn(
+          'rounded-xl border p-4 flex items-center justify-between',
+          isGitHubConnected
+            ? 'border-emerald-800/40 bg-emerald-950/20'
+            : 'border-amber-800/40 bg-amber-950/20'
+        )}>
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              'h-9 w-9 rounded-lg flex items-center justify-center',
+              isGitHubConnected ? 'bg-emerald-900/50 text-emerald-400' : 'bg-amber-900/50 text-amber-400'
+            )}>
+              <Github className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-slate-200">
+                {isGitHubConnected ? `Connected as @${githubUsername}` : 'GitHub account not connected'}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {isGitHubConnected
+                  ? 'Access granted to your authorized repositories and organizations.'
+                  : 'Connect GitHub in Settings to select repositories and branches with one click.'}
+              </p>
+            </div>
+          </div>
+          {!isGitHubConnected && (
+            <Link href="/settings?tab=github" target="_blank" className="flex-shrink-0">
+              <Button size="sm" variant="outline" className="text-xs">
+                Connect GitHub <ExternalLink className="h-3 w-3 ml-1" />
+              </Button>
+            </Link>
+          )}
+        </div>
+      )}
+
+      {/* Connected GitHub Repositories Selector */}
+      {isGitHubConnected && !useManualUrl ? (
+        <div className="space-y-4">
+          <FormField label="Select repository" error={errors.repositoryUrl} required hint="Choose an authorized GitHub repository to deploy.">
+            {isLoadingRepos ? (
+              <div className="flex items-center gap-2 p-3 rounded-lg border border-slate-700 bg-slate-800 text-xs text-slate-400">
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading your repositories...
+              </div>
+            ) : repos.length > 0 ? (
+              <Select
+                value={selectedRepoFull}
+                options={[
+                  { value: '', label: 'Select a repository...' },
+                  ...repos.map((r) => ({
+                    value: r.fullName,
+                    label: `${r.fullName} ${r.isPrivate ? '(Private)' : ''} [${r.language || 'Code'}]`,
+                  })),
+                ]}
+                onChange={(e) => handleSelectRepo(e.target.value)}
+              />
+            ) : (
+              <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-slate-400">
+                No repositories found under this account. You can enter the URL manually.
+              </div>
+            )}
+          </FormField>
+
+          {/* Branch Selector for selected repository */}
+          {selectedRepoFull && (
+            <FormField label="Branch" required hint="Default branch for automated deployments and webhook triggers.">
+              {isLoadingBranches ? (
+                <div className="flex items-center gap-2 p-3 rounded-lg border border-slate-700 bg-slate-800 text-xs text-slate-400">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading branches...
+                </div>
+              ) : branches.length > 0 ? (
+                <Select
+                  value={form.branch}
+                  options={branches.map((b) => ({
+                    value: b.name,
+                    label: b.name,
+                  }))}
+                  onChange={(e) => setForm({ ...form, branch: e.target.value })}
+                />
+              ) : (
+                <Input
+                  value={form.branch}
+                  onChange={(e) => setForm({ ...form, branch: e.target.value })}
+                  placeholder="main"
+                />
+              )}
+            </FormField>
+          )}
+        </div>
+      ) : (
+        /* Manual URL Entry */
+        <div className="space-y-4">
+          <FormField label="Repository URL" error={errors.repositoryUrl} required hint="Full GitHub HTTPS URL, e.g. https://github.com/owner/repository">
+            <Input
+              value={form.repositoryUrl}
+              onChange={(e) => setForm({ ...form, repositoryUrl: e.target.value })}
+              placeholder="https://github.com/owner/repository"
+              error={errors.repositoryUrl}
+            />
+          </FormField>
+          <FormField label="Branch" required hint="Default deployment branch (e.g. main, master, staging)">
+            <Input
+              value={form.branch}
+              onChange={(e) => setForm({ ...form, branch: e.target.value })}
+              placeholder="main"
+            />
+          </FormField>
+        </div>
+      )}
     </div>
   )
 }
@@ -347,7 +526,7 @@ export default function NewProjectPage() {
     if (result.error) {
       toast({ title: 'Failed to create project', description: result.error, variant: 'error' })
     } else {
-      toast({ title: 'Project created!', description: `${form.name} has been created in demo mode.`, variant: 'success' })
+      toast({ title: 'Project created!', description: `${form.name} has been created successfully.`, variant: 'success' })
       router.push(`/projects/${result.data.id}`)
     }
   }

@@ -1,5 +1,10 @@
-import { redirect } from 'next/navigation'
+import { AppLayout } from '@/components/layout/AppLayout'
+import DashboardPage from '@/app/dashboard/page'
 
 export default function HomePage() {
-  redirect('/dashboard')
+  return (
+    <AppLayout>
+      <DashboardPage />
+    </AppLayout>
+  )
 }

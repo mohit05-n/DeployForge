@@ -66,8 +66,8 @@ export default function InfrastructurePage() {
   const handleApply = async () => {
     setShowApplyDialog(false)
     toast({
-      title: 'Apply disabled in demo mode',
-      description: 'Connect a real backend with Terraform integration to apply infrastructure changes.',
+      title: 'Infrastructure mutation restricted',
+      description: 'Terraform automation is scheduled for Phase 7. Changes are read-only in the current release.',
       variant: 'warning',
     })
   }
@@ -82,9 +82,9 @@ export default function InfrastructurePage() {
         onClose={() => setShowApplyDialog(false)}
         onConfirm={handleApply}
         title="Apply Terraform plan"
-        description="This would apply real infrastructure changes. In demo mode, no changes will be made to your cloud account."
-        confirmLabel="Apply (demo — no real changes)"
-        confirmVariant="destructive"
+        description="Phase 7 roadmap: Terraform apply operations are disabled in read-only verification mode."
+        confirmLabel="Acknowledge"
+        confirmVariant="default"
       />
 
       <div className="flex items-start justify-between">
@@ -92,9 +92,9 @@ export default function InfrastructurePage() {
           <h1 className="page-title">Infrastructure</h1>
           <p className="page-subtitle">Cloud resource inventory and Terraform plan management.</p>
         </div>
-        <div className="flex items-center gap-1.5 rounded-full border border-amber-800/50 bg-amber-950/30 px-3 py-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-          <span className="text-xs text-amber-400">Demo Mode — no real cloud connected</span>
+        <div className="flex items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900 px-3 py-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-brand-400" />
+          <span className="text-xs text-slate-400">Read-Only IaC Verification</span>
         </div>
       </div>
 
@@ -191,9 +191,9 @@ export default function InfrastructurePage() {
                 </div>
               ))}
             </div>
-            <div className="mt-3 rounded-lg border border-amber-800/40 bg-amber-950/20 p-3">
-              <p className="text-xs text-amber-400">
-                <strong>Terraform apply is disabled in demo mode.</strong> Pressing &ldquo;Apply plan&rdquo; will not modify any real cloud resources. Connect a real backend to enable infrastructure automation.
+            <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+              <p className="text-xs text-slate-400">
+                <strong className="text-slate-200">IaC Plan Inspection:</strong> Terraform apply operations will be unlocked in Phase 7. DeployForge currently enforces read-only IaC verification.
               </p>
             </div>
           </div>

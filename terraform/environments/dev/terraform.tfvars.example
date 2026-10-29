@@ -1,0 +1,44 @@
+# =============================================================================
+# DeployForge — Dev Environment Variables Example
+# Copy this file to terraform.tfvars:
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# NOTE: terraform.tfvars is ignored by .gitignore to prevent committing secrets.
+# =============================================================================
+
+# Target AWS Region
+aws_region = "us-east-1"
+
+# Deployment Environment
+environment = "dev"
+
+# Project Prefix for Resource Naming
+project_name = "deployforge"
+
+# Networking Configuration
+vpc_cidr           = "10.0.0.0/16"
+public_subnet_cidr = "10.0.1.0/24"
+
+# Application Access
+allowed_app_cidrs = ["0.0.0.0/0"]
+app_port          = 3000
+
+# Administrative Access:
+# - Leave admin_cidr as "" to keep SSH port 22 completely closed.
+#   Administration is done via AWS Systems Manager Session Manager (recommended).
+# - If SSH is strictly required, specify your specific public IP (e.g. "203.0.113.50/32").
+#   NOTE: "0.0.0.0/0" is strictly prohibited by validation rules.
+admin_cidr = ""
+
+# EC2 Deployment Host Specifications (Cost-effective MVP)
+instance_type    = "t3.small"
+root_volume_size = 30
+
+# Optional EC2 Key Pair (leave as "" if using AWS SSM)
+key_name = ""
+
+# Custom Resource Tags
+custom_tags = {
+  Owner       = "platform-team"
+  CostCenter  = "engineering-dev"
+}

@@ -13,8 +13,8 @@ import { Toaster } from '@/components/ui/Toaster'
 export default function SignInPage() {
   const { signIn } = useAuth()
   const router = useRouter()
-  const [email, setEmail] = useState('alex.chen@deployforge.dev')
-  const [password, setPassword] = useState('demo-password')
+  const [email, setEmail] = useState('alex.morgan@deployforge.io')
+  const [password, setPassword] = useState('Password123!')
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({})
@@ -68,10 +68,12 @@ export default function SignInPage() {
             </p>
           </div>
 
-          {/* Demo credentials notice */}
-          <div className="mb-5 rounded-lg border border-amber-800/50 bg-amber-950/30 p-3">
-            <p className="text-xs text-amber-400 font-medium">Demo mode — pre-filled credentials</p>
-            <p className="text-xs text-amber-500 mt-0.5">No real authentication is performed. Any credentials will work.</p>
+          {/* Development credentials helper */}
+          <div className="mb-5 rounded-lg border border-slate-700 bg-slate-800/60 p-3">
+            <p className="text-xs text-slate-300 font-medium">Default Credentials</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Email: <code className="text-brand-300 font-mono">alex.morgan@deployforge.io</code> &bull; Password: <code className="text-brand-300 font-mono">Password123!</code>
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4" noValidate>

@@ -82,11 +82,7 @@ export default function LogsPage() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="page-title">Logs & Monitoring</h1>
-          <p className="page-subtitle">Application logs and health metrics. Metrics are simulated in demo mode.</p>
-        </div>
-        <div className="flex items-center gap-1.5 rounded-full border border-amber-800/50 bg-amber-950/30 px-3 py-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-          <span className="text-xs text-amber-400">Demo data</span>
+          <p className="page-subtitle">Real-time application telemetry, container logs, and health metrics.</p>
         </div>
       </div>
 

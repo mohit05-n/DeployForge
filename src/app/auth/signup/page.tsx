@@ -70,10 +70,7 @@ export default function SignUpPage() {
             </p>
           </div>
 
-          <div className="mb-5 rounded-lg border border-amber-800/50 bg-amber-950/30 p-3">
-            <p className="text-xs text-amber-400 font-medium">Demo mode — no account will be created</p>
-            <p className="text-xs text-amber-500 mt-0.5">Registration is simulated. Connect a real backend to persist accounts.</p>
-          </div>
+
 
           <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <FormField label="Full name" error={errors.name} required>

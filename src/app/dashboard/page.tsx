@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   Rocket, CheckCircle2, XCircle, Activity, Plus, TrendingUp, GitBranch
 } from 'lucide-react'
@@ -17,6 +18,7 @@ import { monitoringService, projectsService, deploymentsService } from '@/servic
 import { MOCK_DEPLOYMENT_CHART_DATA } from '@/lib/mock-data'
 import { formatRelativeTime, formatDuration } from '@/lib/utils'
 import type { Project, Deployment } from '@/types'
+import { JenkinsPipelineWidget } from '@/components/jenkins/JenkinsPipelineWidget'
 
 const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string }) => {
   if (!active || !payload?.length) return null
@@ -33,6 +35,7 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 }
 
 export default function DashboardPage() {
+  const router = useRouter()
   const [isLoading, setIsLoading] = useState(true)
   const [projects, setProjects] = useState<Project[]>([])
   const [deployments, setDeployments] = useState<Deployment[]>([])
@@ -56,6 +59,26 @@ export default function DashboardPage() {
   const runningProjects = projects.filter((p) => p.status === 'active').length
   const recentDeployments = deployments.slice(0, 6)
 
+  // Aggregate real deployment chart data over last 7 days
+  const chartData = (() => {
+    if (deployments.length === 0) return []
+    const days: Record<string, { date: string; successful: number; failed: number }> = {}
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date()
+      d.setDate(d.getDate() - i)
+      const key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      days[key] = { date: key, successful: 0, failed: 0 }
+    }
+    deployments.forEach((dep) => {
+      const key = new Date(dep.triggeredAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      if (days[key]) {
+        if (dep.status === 'success') days[key].successful++
+        else if (dep.status === 'failed') days[key].failed++
+      }
+    })
+    return Object.values(days)
+  })()
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Page header */}
@@ -77,32 +100,35 @@ export default function DashboardPage() {
         <StatCard
           title="Total Projects"
           value={projects.length}
-          delta="+2 this month"
-          trend="up"
+          delta={projects.length > 0 ? `${runningProjects} active` : 'No projects'}
+          trend={projects.length > 0 ? 'up' : 'neutral'}
           icon={<Activity className="h-5 w-5" />}
         />
         <StatCard
           title="Successful Deploys"
           value={stats.successful}
-          delta={`${stats.successRate}% success rate`}
-          trend="up"
+          delta={stats.total > 0 ? `${stats.successRate}% success rate` : 'No deploy history'}
+          trend={stats.successful > 0 ? 'up' : 'neutral'}
           icon={<CheckCircle2 className="h-5 w-5" />}
         />
         <StatCard
           title="Failed Deploys"
           value={stats.failed}
-          delta={stats.failed > 2 ? 'Attention needed' : 'Within normal range'}
+          delta={stats.failed > 2 ? 'Attention needed' : 'Zero failures'}
           trend={stats.failed > 2 ? 'down' : 'neutral'}
           icon={<XCircle className="h-5 w-5" />}
         />
         <StatCard
           title="Apps Running"
           value={runningProjects}
-          delta={`${runningProjects}/${projects.length} projects active`}
+          delta={projects.length > 0 ? `${runningProjects}/${projects.length} running` : 'No active apps'}
           trend="neutral"
           icon={<Rocket className="h-5 w-5" />}
         />
       </div>
+
+      {/* Jenkins CI/CD Pipeline Integration Widget */}
+      <JenkinsPipelineWidget />
 
       {/* Charts + recent activity */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -113,22 +139,27 @@ export default function DashboardPage() {
               <h2 className="text-sm font-semibold text-slate-100">Deployment Activity</h2>
               <p className="text-xs text-slate-500 mt-0.5">Last 7 days</p>
             </div>
-            <div className="flex items-center gap-1.5 rounded-full border border-amber-800/50 bg-amber-950/30 px-2.5 py-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-xs text-amber-400">Demo data</span>
-            </div>
           </div>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={MOCK_DEPLOYMENT_CHART_DATA} barSize={12}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-              <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} />
-              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#94a3b8' }} />
-              <Bar dataKey="successful" name="Successful" fill="#10b981" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="failed" name="Failed" fill="#ef4444" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          {chartData.length === 0 ? (
+            <div className="py-8">
+              <EmptyState
+                title="No deployment activity yet"
+                description="Deployments executed via Jenkins or GitHub webhooks will be tracked and charted here."
+              />
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={chartData} barSize={12}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: '#94a3b8' }} />
+                <Bar dataKey="successful" name="Successful" fill="#10b981" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="failed" name="Failed" fill="#ef4444" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         {/* Quick stats */}
@@ -137,7 +168,7 @@ export default function DashboardPage() {
           <div className="space-y-3">
             {[
               { label: 'Success rate', value: `${stats.successRate}%`, color: 'bg-emerald-500' },
-              { label: 'Avg. deploy time', value: formatDuration(stats.averageDuration), color: 'bg-brand-500' },
+              { label: 'Avg. deploy time', value: stats.total > 0 ? formatDuration(stats.averageDuration) : '—', color: 'bg-brand-500' },
               { label: 'Active projects', value: `${runningProjects}`, color: 'bg-violet-500' },
               { label: 'Total deployments', value: `${stats.total}`, color: 'bg-slate-500' },
             ].map((item) => (
@@ -174,7 +205,7 @@ export default function DashboardPage() {
           </Link>
         </div>
         {recentDeployments.length === 0 ? (
-          <EmptyState title="No deployments yet" description="Trigger a deployment to see it here." />
+          <EmptyState title="No deployments yet" description="Deployments triggered via Jenkins or GitHub will appear here." />
         ) : (
           <table className="data-table w-full">
             <thead>
@@ -223,37 +254,48 @@ export default function DashboardPage() {
             View all
           </Link>
         </div>
-        <table className="data-table w-full">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th className="hidden sm:table-cell">Runtime</th>
-              <th>Status</th>
-              <th className="hidden md:table-cell">Region</th>
-              <th className="hidden lg:table-cell">Updated</th>
-            </tr>
-          </thead>
-          <tbody>
-            {projects.slice(0, 5).map((proj) => (
-              <tr key={proj.id}>
-                <td>
-                  <Link href={`/projects/${proj.id}`} className="font-medium text-slate-200 hover:text-brand-400 transition-colors">
-                    {proj.name}
-                  </Link>
-                  {proj.description && (
-                    <p className="text-xs text-slate-500 mt-0.5 hidden sm:block truncate max-w-xs">{proj.description}</p>
-                  )}
-                </td>
-                <td className="hidden sm:table-cell">
-                  <span className="text-xs font-mono bg-slate-800 px-2 py-0.5 rounded text-slate-400">{proj.runtime}</span>
-                </td>
-                <td><ProjectStatusBadge status={proj.status} /></td>
-                <td className="hidden md:table-cell text-xs text-slate-500 font-mono">{proj.region}</td>
-                <td className="hidden lg:table-cell text-xs text-slate-500">{formatRelativeTime(proj.updatedAt)}</td>
+        {projects.length === 0 ? (
+          <EmptyState
+            title="No projects found"
+            description="Create a project to connect your GitHub repository and configure CI/CD deployments."
+            action={{
+              label: 'Create project',
+              onClick: () => router.push('/projects/new'),
+            }}
+          />
+        ) : (
+          <table className="data-table w-full">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th className="hidden sm:table-cell">Runtime</th>
+                <th>Status</th>
+                <th className="hidden md:table-cell">Region</th>
+                <th className="hidden lg:table-cell">Updated</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {projects.slice(0, 5).map((proj) => (
+                <tr key={proj.id}>
+                  <td>
+                    <Link href={`/projects/${proj.id}`} className="font-medium text-slate-200 hover:text-brand-400 transition-colors">
+                      {proj.name}
+                    </Link>
+                    {proj.description && (
+                      <p className="text-xs text-slate-500 mt-0.5 hidden sm:block truncate max-w-xs">{proj.description}</p>
+                    )}
+                  </td>
+                  <td className="hidden sm:table-cell">
+                    <span className="text-xs font-mono bg-slate-800 px-2 py-0.5 rounded text-slate-400">{proj.runtime}</span>
+                  </td>
+                  <td><ProjectStatusBadge status={proj.status} /></td>
+                  <td className="hidden md:table-cell text-xs text-slate-500 font-mono">{proj.region}</td>
+                  <td className="hidden lg:table-cell text-xs text-slate-500">{formatRelativeTime(proj.updatedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   )
