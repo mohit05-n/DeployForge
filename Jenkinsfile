@@ -146,35 +146,101 @@ pipeline {
                         sh "cat ${reportsDir}/trivy-summary.txt"
                     }
 
-                    // 3. Evaluate Security Policy Gate
+                    // 3. Evaluate Security Policy Gate using robust CLI tool (jq)
+                    // Bypasses JVM Script Security sandbox and avoids non-serializable Groovy maps completely
                     if (fileExists("${reportsDir}/trivy-report.json")) {
-                        def reportText = readFile("${reportsDir}/trivy-report.json")
-                        def gateAssessment = evaluateTrivySecurityGate(reportText, severityGate, fullImage, trivyVer)
-                        reportText = null
+                        def evalScript = """
+                            set -e
+                            REPORT_FILE="${reportsDir}/trivy-report.json"
+                            SUMMARY_FILE="${reportsDir}/scan-summary.json"
+                            OUT_STATUS="${reportsDir}/gate.status"
 
-                        if (gateAssessment.error) {
+                            if ! command -v jq >/dev/null 2>&1; then
+                                echo "ERROR: 'jq' utility is not installed on the Jenkins worker." > "\$OUT_STATUS"
+                                exit 1
+                            fi
+
+                            # Execute robust jq query across vulnerabilities and secrets
+                            # Strictly fails closed if report is invalid or Results is missing/malformed
+                            if ! jq --arg threshold "${severityGate}" \
+                                    --arg image "${fullImage}" \
+                                    --arg version "${trivyVer}" \
+                                    --arg date "\$(date -u +"%Y-%m-%dT%H:%M:%SZ")" '
+                                if (.Results == null or (.Results | type != "array")) then
+                                  error("Invalid Trivy report format: Results array is missing or invalid")
+                                else
+                                  .Results as \$r |
+                                  ([\$r[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length) as \$cv |
+                                  ([\$r[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length) as \$hv |
+                                  ([\$r[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length) as \$mv |
+                                  ([\$r[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length) as \$lv |
+                                  ([\$r[]?.Secrets[]? | select((.Severity // "HIGH") == "CRITICAL")] | length) as \$cs |
+                                  ([\$r[]?.Secrets[]? | select((.Severity // "HIGH") != "CRITICAL")] | length) as \$hs |
+                                  (\$cv + \$cs) as \$crit |
+                                  (\$hv + \$hs) as \$high |
+                                  \$mv as \$med |
+                                  \$lv as \$low |
+                                  (\$crit + \$high + \$med + \$low) as \$tot |
+                                  (if (\$crit > 0 or \$high > 0) then "BLOCKED" else "PASSED" end) as \$res |
+                                  {
+                                    status: "COMPLETED",
+                                    scanResult: \$res,
+                                    blockingPolicyViolated: (\$crit > 0 or \$high > 0),
+                                    severityThreshold: \$threshold,
+                                    criticalCount: \$crit,
+                                    highCount: \$high,
+                                    mediumCount: \$med,
+                                    lowCount: \$low,
+                                    totalCount: \$tot,
+                                    imageTag: \$image,
+                                    scannedAt: \$date,
+                                    scanner: "Trivy",
+                                    scannerVersion: \$version
+                                  }
+                                end
+                            ' "\$REPORT_FILE" > "\$SUMMARY_FILE"; then
+                                echo "ERROR: Failed to parse Trivy JSON report or extract findings with jq." > "\$OUT_STATUS"
+                                exit 1
+                            fi
+
+                            # Extract primitive values into gate status file
+                            jq -r '"\(.criticalCount) \(.highCount) \(.mediumCount) \(.lowCount) \(.totalCount) \(.scanResult)"' "\$SUMMARY_FILE" > "\$OUT_STATUS"
+                        """
+
+                        def exitCode = sh(script: evalScript, returnStatus: true)
+                        def statusOutput = fileExists("${reportsDir}/gate.status") ? readFile("${reportsDir}/gate.status").trim() : ""
+
+                        if (exitCode != 0 || statusOutput.startsWith("ERROR")) {
+                            def parseErr = statusOutput ?: "Failed to evaluate Trivy security gate with jq."
                             env.SCAN_RESULT = "ERROR"
-                            env.SCAN_ERROR_MESSAGE = gateAssessment.error
-                            error("SCANNER ERROR: ${gateAssessment.error}")
+                            env.SCAN_ERROR_MESSAGE = parseErr
+                            echo "❌ SCANNER ERROR: ${parseErr}"
+                            error("SCANNER ERROR: ${parseErr}")
                         }
 
-                        // Write summary JSON using pure string (no parser objects)
-                        writeFile file: "${reportsDir}/scan-summary.json", text: gateAssessment.summaryJson
+                        // Parse simple whitespace-delimited primitive tokens: crit high med low total result
+                        def tokens = statusOutput.tokenize(' ')
+                        def critCount = tokens[0]?.toInteger() ?: 0
+                        def highCount = tokens[1]?.toInteger() ?: 0
+                        def medCount = tokens[2]?.toInteger() ?: 0
+                        def lowCount = tokens[3]?.toInteger() ?: 0
+                        def totalVulns = tokens[4]?.toInteger() ?: 0
+                        def gateResult = tokens[5] ?: "BLOCKED"
 
                         echo "======================================================"
                         echo "         DeployForge Security Gate Assessment         "
                         echo "======================================================"
                         echo "Image       : ${fullImage}"
                         echo "Policy Gate : ${severityGate}"
-                        echo "Critical    : ${gateAssessment.criticalCount}"
-                        echo "High        : ${gateAssessment.highCount}"
-                        echo "Medium      : ${gateAssessment.mediumCount}"
-                        echo "Low         : ${gateAssessment.lowCount}"
-                        echo "Total       : ${gateAssessment.totalCount}"
+                        echo "Critical    : ${critCount}"
+                        echo "High        : ${highCount}"
+                        echo "Medium      : ${medCount}"
+                        echo "Low         : ${lowCount}"
+                        echo "Total       : ${totalVulns}"
                         echo "------------------------------------------------------"
 
-                        if (gateAssessment.blockingPolicyViolated) {
-                            def blockMsg = "Security Policy Gate Failure: Found ${gateAssessment.criticalCount} Critical and ${gateAssessment.highCount} High vulnerabilities exceeding gate threshold (${severityGate})."
+                        if (gateResult == 'BLOCKED' || critCount > 0 || highCount > 0) {
+                            def blockMsg = "Security Policy Gate Failure: Found ${critCount} Critical and ${highCount} High vulnerabilities exceeding gate threshold (${severityGate})."
                             env.SCAN_RESULT = "BLOCKED"
                             env.SCAN_ERROR_MESSAGE = blockMsg
                             echo "🚨 POLICY VIOLATION: ${blockMsg}"
@@ -339,87 +405,4 @@ pipeline {
             echo "DeployForge Jenkins build failed. Inspect security scan reports and console output for failure details."
         }
     }
-}
-
-/**
- * Isolated security assessment helper.
- * Marked @NonCPS to execute in standard Groovy runtime without CPS transformation.
- * All parser objects (JsonSlurper, LazyMap, AST nodes) exist only in this stack frame
- * and are completely disposed of before returning pure serializable primitives to the pipeline.
- */
-@NonCPS
-def evaluateTrivySecurityGate(String reportJsonText, String severityGate, String fullImage, String trivyVer) {
-    def result = [
-        criticalCount: 0,
-        highCount: 0,
-        mediumCount: 0,
-        lowCount: 0,
-        totalCount: 0,
-        blockingPolicyViolated: false,
-        summaryJson: "{}",
-        error: null
-    ]
-
-    try {
-        def slurper = new groovy.json.JsonSlurperClassic()
-        def reportData = slurper.parseText(reportJsonText)
-
-        int crit = 0
-        int high = 0
-        int med = 0
-        int low = 0
-
-        if (reportData?.Results) {
-            for (res in reportData.Results) {
-                if (res.Vulnerabilities) {
-                    for (v in res.Vulnerabilities) {
-                        def sev = (v.Severity ?: 'UNKNOWN').toString().toUpperCase()
-                        if (sev == 'CRITICAL') crit++
-                        else if (sev == 'HIGH') high++
-                        else if (sev == 'MEDIUM') med++
-                        else if (sev == 'LOW') low++
-                    }
-                }
-                if (res.Secrets) {
-                    for (s in res.Secrets) {
-                        def sev = (s.Severity ?: 'HIGH').toString().toUpperCase()
-                        if (sev == 'CRITICAL') crit++
-                        else high++
-                    }
-                }
-            }
-        }
-
-        int total = crit + high + med + low
-        boolean violated = (crit > 0 || high > 0)
-
-        result.criticalCount = crit
-        result.highCount = high
-        result.mediumCount = med
-        result.lowCount = low
-        result.totalCount = total
-        result.blockingPolicyViolated = violated
-
-        def summaryMap = [
-            status: "COMPLETED",
-            scanResult: violated ? "BLOCKED" : "PASSED",
-            blockingPolicyViolated: violated,
-            severityThreshold: severityGate,
-            criticalCount: crit,
-            highCount: high,
-            mediumCount: med,
-            lowCount: low,
-            totalCount: total,
-            imageTag: fullImage,
-            scannedAt: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone("UTC")),
-            scanner: "Trivy",
-            scannerVersion: trivyVer
-        ]
-
-        result.summaryJson = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(summaryMap))
-    } catch (Exception ex) {
-        result.error = "Malformed Trivy JSON report: ${ex.message}"
-    }
-
-    return result
 }

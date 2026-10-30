@@ -11,7 +11,11 @@ COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
 # 2. Provide official static Trivy 0.76.1 scanner binary for fast container scanning
 COPY --from=aquasec/trivy:0.76.1 /usr/local/bin/trivy /usr/local/bin/trivy
 
-# 3. Add jenkins user to root group to grant access to mounted Docker socket (/var/run/docker.sock)
+# 3. Provide official static jq binary for robust sandboxed JSON evaluation without JVM Script Security barriers
+COPY --from=ghcr.io/jqlang/jq:latest /jq /usr/local/bin/jq
+RUN chmod +x /usr/local/bin/jq
+
+# 4. Add jenkins user to root group to grant access to mounted Docker socket (/var/run/docker.sock)
 RUN usermod -aG root jenkins
 
 USER jenkins
