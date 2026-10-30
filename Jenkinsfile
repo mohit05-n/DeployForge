@@ -85,12 +85,13 @@ pipeline {
             steps {
                 echo "=== Stage 4: Isolated Container Build ==="
                 sh '''
-                    echo "Building multi-stage Docker image for DeployForge (${FULL_IMAGE})..."
-                    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-                        docker build -t ${FULL_IMAGE} -t ${IMAGE_NAME}:latest .
-                    else
-                        echo "Docker engine unavailable in current runner; image assumed built by build-worker."
+                    echo "Checking Docker engine availability..."
+                    if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+                        echo "ERROR: Docker engine is not available on this Jenkins agent."
+                        exit 1
                     fi
+                    echo "Building multi-stage Docker image for DeployForge (${FULL_IMAGE})..."
+                    docker build -t ${FULL_IMAGE} -t ${IMAGE_NAME}:latest .
                 '''
             }
         }
@@ -99,13 +100,12 @@ pipeline {
             steps {
                 echo "=== Stage 5: Container Image Verification ==="
                 sh '''
-                    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-                        echo "Inspecting Docker image metadata and entrypoint contract..."
-                        docker image inspect ${FULL_IMAGE} > /dev/null
-                        echo "Image ${FULL_IMAGE} verified successfully."
-                    else
-                        echo "Skipping local image inspect; controlled scanner will verify image existence."
+                    echo "Inspecting Docker image metadata and entrypoint contract..."
+                    if ! docker image inspect ${FULL_IMAGE} >/dev/null 2>&1; then
+                        echo "ERROR: Docker image ${FULL_IMAGE} was not found after build."
+                        exit 1
                     fi
+                    echo "Image ${FULL_IMAGE} verified successfully."
                 '''
             }
         }
@@ -114,45 +114,50 @@ pipeline {
             steps {
                 echo "=== Stage 6: Trivy Container Vulnerability & Secret Scan ==="
                 script {
-                    sh "mkdir -p ${REPORTS_DIR}"
-                    def scannerExecuted = false
-                    def scannerError = ""
+                    def reportsDir = env.REPORTS_DIR ?: "reports/security"
+                    def fullImage = env.FULL_IMAGE ?: "${params.IMAGE_NAME ?: 'deployforge-app'}:${params.IMAGE_TAG ?: 'latest'}"
+                    def trivyVer = env.TRIVY_VERSION ?: "0.76.1"
+                    def severityGate = env.SEVERITY_GATE ?: "HIGH,CRITICAL"
 
-                    // 1. Attempt scan using local Trivy CLI or containerized Trivy 0.76.1
+                    sh "mkdir -p ${reportsDir}"
+
+                    // 1. Run Trivy vulnerability & secret scan
+                    // Supports local Trivy binary or containerized fallback
                     def scanScript = """
                         set +e
-                        echo "Running Trivy ${TRIVY_VERSION} vulnerability & secret scan on ${FULL_IMAGE}..."
+                        echo "Running Trivy ${trivyVer} vulnerability & secret scan on ${fullImage}..."
                         if command -v trivy >/dev/null 2>&1; then
-                            trivy image --scanners vuln,secret --severity ${SEVERITY_GATE} --format json -o ${REPORTS_DIR}/trivy-report.json ${FULL_IMAGE}
-                            trivy image --scanners vuln,secret --severity ${SEVERITY_GATE} --format table -o ${REPORTS_DIR}/trivy-summary.txt ${FULL_IMAGE}
-                            echo "SCAN_EXIT_CODE=\$?" > ${REPORTS_DIR}/scan.exit
+                            trivy image --scanners vuln,secret --severity ${severityGate} --format json -o ${reportsDir}/trivy-report.json ${fullImage}
+                            trivy image --scanners vuln,secret --severity ${severityGate} --format table -o ${reportsDir}/trivy-summary.txt ${fullImage}
+                            echo "SCAN_EXIT_CODE=\$?" > ${reportsDir}/scan.exit
                         elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-                            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "\$(pwd)/${REPORTS_DIR}:/reports" aquasec/trivy:${TRIVY_VERSION} image --scanners vuln,secret --severity ${SEVERITY_GATE} --format json -o /reports/trivy-report.json ${FULL_IMAGE}
-                            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "\$(pwd)/${REPORTS_DIR}:/reports" aquasec/trivy:${TRIVY_VERSION} image --scanners vuln,secret --severity ${SEVERITY_GATE} --format table -o /reports/trivy-summary.txt ${FULL_IMAGE}
-                            echo "SCAN_EXIT_CODE=\$?" > ${REPORTS_DIR}/scan.exit
+                            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "\$(pwd)/${reportsDir}:/reports" aquasec/trivy:${trivyVer} image --scanners vuln,secret --severity ${severityGate} --format json -o /reports/trivy-report.json ${fullImage}
+                            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "\$(pwd)/${reportsDir}:/reports" aquasec/trivy:${trivyVer} image --scanners vuln,secret --severity ${severityGate} --format table -o /reports/trivy-summary.txt ${fullImage}
+                            echo "SCAN_EXIT_CODE=\$?" > ${reportsDir}/scan.exit
                         else
-                            echo "SCANNER_NOT_FOUND" > ${REPORTS_DIR}/scan.exit
+                            echo "SCANNER_NOT_FOUND" > ${reportsDir}/scan.exit
                         fi
                     """
                     sh scanScript
 
                     // 2. Display formatted terminal summary if generated
-                    if (fileExists("${REPORTS_DIR}/trivy-summary.txt")) {
+                    if (fileExists("${reportsDir}/trivy-summary.txt")) {
                         echo "--- Trivy Security Scan Terminal Summary ---"
-                        sh "cat ${REPORTS_DIR}/trivy-summary.txt"
+                        sh "cat ${reportsDir}/trivy-summary.txt"
                     }
 
                     // 3. Evaluate Security Policy Gate
-                    if (fileExists("${REPORTS_DIR}/trivy-report.json")) {
-                        def reportText = readFile("${REPORTS_DIR}/trivy-report.json")
+                    if (fileExists("${reportsDir}/trivy-report.json")) {
+                        def reportText = readFile("${reportsDir}/trivy-report.json")
                         def jsonSlurper = new groovy.json.JsonSlurper()
                         def reportData = null
                         try {
                             reportData = jsonSlurper.parseText(reportText)
                         } catch (Exception parseEx) {
+                            def parseErr = "Malformed Trivy JSON report: ${parseEx.message}"
                             env.SCAN_RESULT = "ERROR"
-                            env.SCAN_ERROR_MESSAGE = "Malformed Trivy JSON report: ${parseEx.message}"
-                            error("SCANNER ERROR: Malformed Trivy report output.")
+                            env.SCAN_ERROR_MESSAGE = parseErr
+                            error("SCANNER ERROR: ${parseErr}")
                         }
 
                         def critCount = 0
@@ -188,24 +193,24 @@ pipeline {
                             status: "COMPLETED",
                             scanResult: (critCount > 0 || highCount > 0) ? "BLOCKED" : "PASSED",
                             blockingPolicyViolated: (critCount > 0 || highCount > 0),
-                            severityThreshold: env.SEVERITY_GATE,
+                            severityThreshold: severityGate,
                             criticalCount: critCount,
                             highCount: highCount,
                             mediumCount: medCount,
                             lowCount: lowCount,
                             totalCount: totalVulns,
-                            imageTag: env.FULL_IMAGE,
+                            imageTag: fullImage,
                             scannedAt: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone("UTC")),
                             scanner: "Trivy",
-                            scannerVersion: env.TRIVY_VERSION
+                            scannerVersion: trivyVer
                         ]
-                        writeFile file: "${REPORTS_DIR}/scan-summary.json", text: groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(summaryMap))
+                        writeFile file: "${reportsDir}/scan-summary.json", text: groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(summaryMap))
 
                         echo "======================================================"
                         echo "         DeployForge Security Gate Assessment         "
                         echo "======================================================"
-                        echo "Image       : ${env.FULL_IMAGE}"
-                        echo "Policy Gate : ${env.SEVERITY_GATE}"
+                        echo "Image       : ${fullImage}"
+                        echo "Policy Gate : ${severityGate}"
                         echo "Critical    : ${critCount}"
                         echo "High        : ${highCount}"
                         echo "Medium      : ${medCount}"
@@ -214,26 +219,28 @@ pipeline {
                         echo "------------------------------------------------------"
 
                         if (critCount > 0 || highCount > 0) {
+                            def blockMsg = "Security Policy Gate Failure: Found ${critCount} Critical and ${highCount} High vulnerabilities exceeding gate threshold (${severityGate})."
                             env.SCAN_RESULT = "BLOCKED"
-                            def blockMsg = "Security Policy Gate Failure: Found ${critCount} Critical and ${highCount} High vulnerabilities exceeding gate threshold (${env.SEVERITY_GATE})."
                             env.SCAN_ERROR_MESSAGE = blockMsg
                             echo "🚨 POLICY VIOLATION: ${blockMsg}"
                             error(blockMsg)
                         } else {
                             env.SCAN_RESULT = "PASSED"
-                            echo "✅ SECURITY GATE PASSED: Zero blocking findings detected in ${env.FULL_IMAGE}."
+                            echo "✅ SECURITY GATE PASSED: Zero blocking findings detected in ${fullImage}."
                         }
                     } else {
                         // Check if scanner was unavailable vs crash
-                        def exitCodeStatus = fileExists("${REPORTS_DIR}/scan.exit") ? readFile("${REPORTS_DIR}/scan.exit").trim() : "UNKNOWN"
+                        def exitCodeStatus = fileExists("${reportsDir}/scan.exit") ? readFile("${reportsDir}/scan.exit").trim() : "UNKNOWN"
+                        def diagMsg = ""
                         env.SCAN_RESULT = "ERROR"
                         if (exitCodeStatus.contains("SCANNER_NOT_FOUND")) {
-                            env.SCAN_ERROR_MESSAGE = "Scanner unavailable: Trivy 0.76.1 binary or Docker engine not found on Jenkins worker."
+                            diagMsg = "Scanner unavailable: neither Trivy CLI nor Docker engine is available on the Jenkins agent."
                         } else {
-                            env.SCAN_ERROR_MESSAGE = "Trivy scanner failed to execute or generate report (${exitCodeStatus})."
+                            diagMsg = "Trivy scanner failed to execute or generate report (exit status: ${exitCodeStatus})."
                         }
-                        echo "❌ SCANNER ERROR: ${env.SCAN_ERROR_MESSAGE}"
-                        error(env.SCAN_ERROR_MESSAGE)
+                        env.SCAN_ERROR_MESSAGE = diagMsg
+                        echo "❌ SCANNER ERROR: ${diagMsg}"
+                        error(diagMsg)
                     }
                 }
             }
@@ -334,15 +341,16 @@ pipeline {
     post {
         always {
             echo "Archiving security scan reports and artifacts..."
-            archiveArtifacts artifacts: "${REPORTS_DIR}/*", allowEmptyArchive: true
+            archiveArtifacts artifacts: 'reports/security/**', allowEmptyArchive: true
 
             script {
+                def reportsDir = env.REPORTS_DIR ?: "reports/security"
                 if (params.CALLBACK_URL && params.CALLBACK_TOKEN) {
                     echo "Dispatching callback with security scan results to DeployForge..."
                     sh """
                         SUMMARY_JSON='{}'
-                        if [ -f "${REPORTS_DIR}/scan-summary.json" ]; then
-                            SUMMARY_JSON=\$(cat "${REPORTS_DIR}/scan-summary.json")
+                        if [ -f "${reportsDir}/scan-summary.json" ]; then
+                            SUMMARY_JSON=\$(cat "${reportsDir}/scan-summary.json")
                         fi
 
                         curl -s -X POST "${params.CALLBACK_URL}" \

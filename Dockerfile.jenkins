@@ -1,0 +1,17 @@
+# ==============================================================================
+# DeployForge Jenkins Controller / Worker with Docker CLI & Trivy Scanner
+# ==============================================================================
+FROM jenkins/jenkins:lts-jdk21
+
+USER root
+
+# 1. Provide official static Docker CLI binary without running a full daemon inside
+COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
+
+# 2. Provide official static Trivy 0.76.1 scanner binary for fast container scanning
+COPY --from=aquasec/trivy:0.76.1 /usr/local/bin/trivy /usr/local/bin/trivy
+
+# 3. Add jenkins user to root group to grant access to mounted Docker socket (/var/run/docker.sock)
+RUN usermod -aG root jenkins
+
+USER jenkins

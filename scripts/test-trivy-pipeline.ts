@@ -308,6 +308,43 @@ async function runTrivyPipelineTests() {
     const invalidRawUrl = 'https://123456789012.dkr.ecr.ap-south-1.amazonaws.com/deployforge-app'
     assert(!ecrPattern.test(invalidRawUrl), 'Rejects URI containing http/https scheme prefix')
 
+    // ------------------------------------------------------------------------
+    // 10. Jenkinsfile Pipeline Invariants & Diagnostic Error Handling Tests
+    // ------------------------------------------------------------------------
+    console.log('\n--- 10. Testing Jenkinsfile Declarative Pipeline Contracts & Diagnostics ---')
+    const jenkinsfilePath = path.join(process.cwd(), 'Jenkinsfile')
+    assert(fs.existsSync(jenkinsfilePath), 'Root Jenkinsfile exists')
+
+    const jenkinsfileContent = fs.readFileSync(jenkinsfilePath, 'utf8')
+    assert(
+      jenkinsfileContent.includes("command -v docker >/dev/null 2>&1") &&
+      jenkinsfileContent.includes("ERROR: Docker engine is not available"),
+      'Stage 4 strictly verifies Docker engine availability and fails closed'
+    )
+    assert(
+      jenkinsfileContent.includes("docker image inspect ${FULL_IMAGE} >/dev/null 2>&1") &&
+      jenkinsfileContent.includes("ERROR: Docker image ${FULL_IMAGE} was not found after build"),
+      'Stage 5 strictly verifies built Docker image existence'
+    )
+    assert(
+      jenkinsfileContent.includes("def reportsDir = env.REPORTS_DIR") &&
+      jenkinsfileContent.includes("def fullImage = env.FULL_IMAGE"),
+      'Stage 6 uses local Groovy variable bindings to prevent null GString interpolation'
+    )
+    assert(
+      jenkinsfileContent.includes("Scanner unavailable: neither Trivy CLI nor Docker engine is available on the Jenkins agent."),
+      'Stage 6 provides descriptive diagnostic message for missing scanner (prevents ERROR: null)'
+    )
+    assert(
+      jenkinsfileContent.includes("return env.SCAN_RESULT == 'PASSED'") &&
+      jenkinsfileContent.includes("credentialsId: 'aws-ecr-credentials'"),
+      'Stage 7 gates ECR publication on SCAN_RESULT == PASSED and uses aws-ecr-credentials'
+    )
+    assert(
+      jenkinsfileContent.includes("docker logout") && jenkinsfileContent.includes("finally {"),
+      'Stage 7 guarantees Docker credential logout in finally block'
+    )
+
     console.log('\n======================================================')
     console.log('                 TEST SUMMARY')
     console.log('======================================================')

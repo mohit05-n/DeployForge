@@ -22,13 +22,19 @@ services:
 
   # Jenkins CI/CD Server
   jenkins:
-    image: jenkins/jenkins:lts-jdk21
+    build:
+      context: .
+      dockerfile: Dockerfile.jenkins
+    image: deployforge-jenkins:lts-docker
     container_name: deployforge-jenkins
     restart: unless-stopped
     ports:
       - "127.0.0.1:8081:8080"
     volumes:
       - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "0"
     networks:
       - deployforge-net
 
