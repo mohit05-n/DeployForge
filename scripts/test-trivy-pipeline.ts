@@ -344,6 +344,13 @@ async function runTrivyPipelineTests() {
       jenkinsfileContent.includes("docker logout") && jenkinsfileContent.includes("finally {"),
       'Stage 7 guarantees Docker credential logout in finally block'
     )
+    assert(
+      jenkinsfileContent.includes("new groovy.json.JsonSlurperClassic()") &&
+      !jenkinsfileContent.includes("new groovy.json.JsonSlurper()") &&
+      jenkinsfileContent.includes("reportData = null") &&
+      jenkinsfileContent.includes("jsonSlurper = null"),
+      'Stage 6 uses JsonSlurperClassic and clears parser variables before CPS suspension points'
+    )
 
     console.log('\n======================================================')
     console.log('                 TEST SUMMARY')

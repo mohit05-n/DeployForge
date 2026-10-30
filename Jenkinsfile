@@ -149,7 +149,7 @@ pipeline {
                     // 3. Evaluate Security Policy Gate
                     if (fileExists("${reportsDir}/trivy-report.json")) {
                         def reportText = readFile("${reportsDir}/trivy-report.json")
-                        def jsonSlurper = new groovy.json.JsonSlurper()
+                        def jsonSlurper = new groovy.json.JsonSlurperClassic()
                         def reportData = null
                         try {
                             reportData = jsonSlurper.parseText(reportText)
@@ -170,7 +170,7 @@ pipeline {
                             for (res in reportData.Results) {
                                 if (res.Vulnerabilities) {
                                     for (v in res.Vulnerabilities) {
-                                        def sev = (v.Severity ?: 'UNKNOWN').toUpperCase()
+                                        def sev = (v.Severity ?: 'UNKNOWN').toString().toUpperCase()
                                         if (sev == 'CRITICAL') critCount++
                                         else if (sev == 'HIGH') highCount++
                                         else if (sev == 'MEDIUM') medCount++
@@ -179,7 +179,7 @@ pipeline {
                                 }
                                 if (res.Secrets) {
                                     for (s in res.Secrets) {
-                                        def sev = (s.Severity ?: 'HIGH').toUpperCase()
+                                        def sev = (s.Severity ?: 'HIGH').toString().toUpperCase()
                                         if (sev == 'CRITICAL') critCount++
                                         else highCount++
                                     }
@@ -188,7 +188,12 @@ pipeline {
                         }
                         totalVulns = critCount + highCount + medCount + lowCount
 
-                        // Write normalized summary JSON
+                        // Null out raw parser objects before pipeline step execution / CPS suspension points
+                        reportData = null
+                        jsonSlurper = null
+                        reportText = null
+
+                        // Write normalized summary JSON using serializable primitive types
                         def summaryMap = [
                             status: "COMPLETED",
                             scanResult: (critCount > 0 || highCount > 0) ? "BLOCKED" : "PASSED",
@@ -204,7 +209,9 @@ pipeline {
                             scanner: "Trivy",
                             scannerVersion: trivyVer
                         ]
-                        writeFile file: "${reportsDir}/scan-summary.json", text: groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(summaryMap))
+                        def summaryJsonText = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(summaryMap))
+                        summaryMap = null
+                        writeFile file: "${reportsDir}/scan-summary.json", text: summaryJsonText
 
                         echo "======================================================"
                         echo "         DeployForge Security Gate Assessment         "
