@@ -345,11 +345,15 @@ async function runTrivyPipelineTests() {
       'Stage 7 guarantees Docker credential logout in finally block'
     )
     assert(
+      jenkinsfileContent.includes("evaluateTrivySecurityGate(reportText, severityGate, fullImage, trivyVer)") &&
+      jenkinsfileContent.includes("@NonCPS\ndef evaluateTrivySecurityGate") &&
       jenkinsfileContent.includes("new groovy.json.JsonSlurperClassic()") &&
-      !jenkinsfileContent.includes("new groovy.json.JsonSlurper()") &&
-      jenkinsfileContent.includes("reportData = null") &&
-      jenkinsfileContent.includes("jsonSlurper = null"),
-      'Stage 6 uses JsonSlurperClassic and clears parser variables before CPS suspension points'
+      !jenkinsfileContent.includes("new groovy.json.JsonSlurper()"),
+      'Stage 6 isolates JSON parsing into @NonCPS evaluateTrivySecurityGate using JsonSlurperClassic'
+    )
+    assert(
+      !jenkinsfileContent.includes("groovy.json.internal.LazyMap"),
+      'Pipeline does not reference or retain non-serializable LazyMap'
     )
 
     console.log('\n======================================================')

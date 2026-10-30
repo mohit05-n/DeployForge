@@ -149,84 +149,32 @@ pipeline {
                     // 3. Evaluate Security Policy Gate
                     if (fileExists("${reportsDir}/trivy-report.json")) {
                         def reportText = readFile("${reportsDir}/trivy-report.json")
-                        def jsonSlurper = new groovy.json.JsonSlurperClassic()
-                        def reportData = null
-                        try {
-                            reportData = jsonSlurper.parseText(reportText)
-                        } catch (Exception parseEx) {
-                            def parseErr = "Malformed Trivy JSON report: ${parseEx.message}"
-                            env.SCAN_RESULT = "ERROR"
-                            env.SCAN_ERROR_MESSAGE = parseErr
-                            error("SCANNER ERROR: ${parseErr}")
-                        }
-
-                        def critCount = 0
-                        def highCount = 0
-                        def medCount = 0
-                        def lowCount = 0
-                        def totalVulns = 0
-
-                        if (reportData?.Results) {
-                            for (res in reportData.Results) {
-                                if (res.Vulnerabilities) {
-                                    for (v in res.Vulnerabilities) {
-                                        def sev = (v.Severity ?: 'UNKNOWN').toString().toUpperCase()
-                                        if (sev == 'CRITICAL') critCount++
-                                        else if (sev == 'HIGH') highCount++
-                                        else if (sev == 'MEDIUM') medCount++
-                                        else if (sev == 'LOW') lowCount++
-                                    }
-                                }
-                                if (res.Secrets) {
-                                    for (s in res.Secrets) {
-                                        def sev = (s.Severity ?: 'HIGH').toString().toUpperCase()
-                                        if (sev == 'CRITICAL') critCount++
-                                        else highCount++
-                                    }
-                                }
-                            }
-                        }
-                        totalVulns = critCount + highCount + medCount + lowCount
-
-                        // Null out raw parser objects before pipeline step execution / CPS suspension points
-                        reportData = null
-                        jsonSlurper = null
+                        def gateAssessment = evaluateTrivySecurityGate(reportText, severityGate, fullImage, trivyVer)
                         reportText = null
 
-                        // Write normalized summary JSON using serializable primitive types
-                        def summaryMap = [
-                            status: "COMPLETED",
-                            scanResult: (critCount > 0 || highCount > 0) ? "BLOCKED" : "PASSED",
-                            blockingPolicyViolated: (critCount > 0 || highCount > 0),
-                            severityThreshold: severityGate,
-                            criticalCount: critCount,
-                            highCount: highCount,
-                            mediumCount: medCount,
-                            lowCount: lowCount,
-                            totalCount: totalVulns,
-                            imageTag: fullImage,
-                            scannedAt: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone("UTC")),
-                            scanner: "Trivy",
-                            scannerVersion: trivyVer
-                        ]
-                        def summaryJsonText = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(summaryMap))
-                        summaryMap = null
-                        writeFile file: "${reportsDir}/scan-summary.json", text: summaryJsonText
+                        if (gateAssessment.error) {
+                            env.SCAN_RESULT = "ERROR"
+                            env.SCAN_ERROR_MESSAGE = gateAssessment.error
+                            error("SCANNER ERROR: ${gateAssessment.error}")
+                        }
+
+                        // Write summary JSON using pure string (no parser objects)
+                        writeFile file: "${reportsDir}/scan-summary.json", text: gateAssessment.summaryJson
 
                         echo "======================================================"
                         echo "         DeployForge Security Gate Assessment         "
                         echo "======================================================"
                         echo "Image       : ${fullImage}"
                         echo "Policy Gate : ${severityGate}"
-                        echo "Critical    : ${critCount}"
-                        echo "High        : ${highCount}"
-                        echo "Medium      : ${medCount}"
-                        echo "Low         : ${lowCount}"
-                        echo "Total       : ${totalVulns}"
+                        echo "Critical    : ${gateAssessment.criticalCount}"
+                        echo "High        : ${gateAssessment.highCount}"
+                        echo "Medium      : ${gateAssessment.mediumCount}"
+                        echo "Low         : ${gateAssessment.lowCount}"
+                        echo "Total       : ${gateAssessment.totalCount}"
                         echo "------------------------------------------------------"
 
-                        if (critCount > 0 || highCount > 0) {
-                            def blockMsg = "Security Policy Gate Failure: Found ${critCount} Critical and ${highCount} High vulnerabilities exceeding gate threshold (${severityGate})."
+                        if (gateAssessment.blockingPolicyViolated) {
+                            def blockMsg = "Security Policy Gate Failure: Found ${gateAssessment.criticalCount} Critical and ${gateAssessment.highCount} High vulnerabilities exceeding gate threshold (${severityGate})."
                             env.SCAN_RESULT = "BLOCKED"
                             env.SCAN_ERROR_MESSAGE = blockMsg
                             echo "🚨 POLICY VIOLATION: ${blockMsg}"
@@ -391,4 +339,87 @@ pipeline {
             echo "DeployForge Jenkins build failed. Inspect security scan reports and console output for failure details."
         }
     }
+}
+
+/**
+ * Isolated security assessment helper.
+ * Marked @NonCPS to execute in standard Groovy runtime without CPS transformation.
+ * All parser objects (JsonSlurper, LazyMap, AST nodes) exist only in this stack frame
+ * and are completely disposed of before returning pure serializable primitives to the pipeline.
+ */
+@NonCPS
+def evaluateTrivySecurityGate(String reportJsonText, String severityGate, String fullImage, String trivyVer) {
+    def result = [
+        criticalCount: 0,
+        highCount: 0,
+        mediumCount: 0,
+        lowCount: 0,
+        totalCount: 0,
+        blockingPolicyViolated: false,
+        summaryJson: "{}",
+        error: null
+    ]
+
+    try {
+        def slurper = new groovy.json.JsonSlurperClassic()
+        def reportData = slurper.parseText(reportJsonText)
+
+        int crit = 0
+        int high = 0
+        int med = 0
+        int low = 0
+
+        if (reportData?.Results) {
+            for (res in reportData.Results) {
+                if (res.Vulnerabilities) {
+                    for (v in res.Vulnerabilities) {
+                        def sev = (v.Severity ?: 'UNKNOWN').toString().toUpperCase()
+                        if (sev == 'CRITICAL') crit++
+                        else if (sev == 'HIGH') high++
+                        else if (sev == 'MEDIUM') med++
+                        else if (sev == 'LOW') low++
+                    }
+                }
+                if (res.Secrets) {
+                    for (s in res.Secrets) {
+                        def sev = (s.Severity ?: 'HIGH').toString().toUpperCase()
+                        if (sev == 'CRITICAL') crit++
+                        else high++
+                    }
+                }
+            }
+        }
+
+        int total = crit + high + med + low
+        boolean violated = (crit > 0 || high > 0)
+
+        result.criticalCount = crit
+        result.highCount = high
+        result.mediumCount = med
+        result.lowCount = low
+        result.totalCount = total
+        result.blockingPolicyViolated = violated
+
+        def summaryMap = [
+            status: "COMPLETED",
+            scanResult: violated ? "BLOCKED" : "PASSED",
+            blockingPolicyViolated: violated,
+            severityThreshold: severityGate,
+            criticalCount: crit,
+            highCount: high,
+            mediumCount: med,
+            lowCount: low,
+            totalCount: total,
+            imageTag: fullImage,
+            scannedAt: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone("UTC")),
+            scanner: "Trivy",
+            scannerVersion: trivyVer
+        ]
+
+        result.summaryJson = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(summaryMap))
+    } catch (Exception ex) {
+        result.error = "Malformed Trivy JSON report: ${ex.message}"
+    }
+
+    return result
 }
